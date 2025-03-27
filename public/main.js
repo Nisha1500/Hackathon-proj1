@@ -1,155 +1,41 @@
-import dotenv from 'dotenv';
-dotenv.config();
-
-// ✅ Import Firebase SDK at the top!
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-import { getFirestore, collection, addDoc, getDocs, setDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+// main.js file
 
 console.log("🔥 main.js is running!");
 
-// ✅ Firebase configuration
-const firebaseConfig = {
-  apiKey: process.env.FIREBASE_API_KEY,
-  authDomain: process.env.FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.FIREBASE_APP_ID
-};
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+import { getFirestore, collection, addDoc, getDocs, setDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { getAuth, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+import { firebaseConfig, firebaseCredentials } from '/firebase-config.js';
 
 
-// ✅ Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
 
 console.log("✅ Firebase initialized:", app);
 console.log("✅ Firestore initialized:", db);
 
-// ✅ Firestore Reference
 const triggerWordsRef = collection(db, "triggerwords");
 
-// ✅ Web Worker Setup (BEFORE loading trigger words)
-let speechWorker = null; // Declare speechWorker globally
-
-if (window.Worker) {
-  speechWorker = new Worker("speechWorker.js");
-
-  // ✅ Handle messages from the worker
-  speechWorker.onmessage = function (event) {
-    if (event.data.type === "result") {
-      console.log("Recognized Speech:", event.data.text);
-    } else if (event.data.type === "trigger") {
-      console.log("🚨 Trigger word detected:", event.data.word);
-      
-      // ✅ Send push notification through the service worker
-      if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.ready.then(registration => {
-          registration.showNotification("Speech Alert", {
-            body: `Trigger word detected: "${event.data.word}"`,
-            icon: "/img/ikon-pwa.png",
-            vibrate: [200, 100, 200]
-          });
-        });
-      }
-
-      triggerVibration();
-    } else if (event.data.type === "error") {
-      console.error("Speech Recognition Error:", event.data.error);
-    } else if (event.data.type === "stopped") {
-      console.log("Speech recognition stopped.");
-    } else if (event.data.type === "log") {
-      console.log(event.data.message);
-    }
-  };
-}
-
-// ✅ Ensure startListening is globally available
-function startListening() {
-  if (speechWorker) {
-    speechWorker.postMessage("start");
-    console.log("🎙️ Speech recognition started.");
-  } else {
-    console.error("❌ Speech worker not initialized!");
-  }
-}
-
-
-// ✅ Ensure stopListening is globally available now 
-function stopListening() {
-  if (speechWorker) {
-    speechWorker.postMessage("stop");
-  } else {
-    console.error("❌ Speech worker not initialized!");
-  }
-}
-
-// ✅ Function to load trigger words from Firestore
-async function loadTriggerWords() {
+async function authenticateFirebase() {
   try {
-    const querySnapshot = await getDocs(triggerWordsRef);
-    let allWords = [];
-
-    querySnapshot.forEach(doc => {
-      allWords = allWords.concat(doc.data().words);
-    });
-
-    console.log("🔥 Loaded trigger words from Firestore:", allWords);
-
-    if (speechWorker) {
-      speechWorker.postMessage({ type: "setTriggerWords", words: allWords });
-
-      // ✅ Start listening after trigger words are set
-      console.log("🎙️ Starting speech recognition...");
-      startListening();
-    }
+    const userCredential = await signInWithEmailAndPassword(
+      auth, 
+      firebaseCredentials.email, 
+      firebaseCredentials.password
+    );
+    console.log("✅ Firebase Authentication Successful:", userCredential.user.uid);
+    return userCredential.user;
   } catch (error) {
-    console.error("❌ Error loading trigger words:", error);
+    console.error("❌ Firebase Authentication Error:", error);
+    throw error;
+    
   }
 }
 
-// ✅ Function to save trigger words to Firestore
-async function saveTriggerWords() {
-  const input = document.getElementById("trigger-words").value.trim();
-  if (!input) {
-    alert("Please enter trigger words!");
-    return;
-  }
-
-  const wordsArray = input.split(",").map(word => word.trim().toLowerCase());
-
-  try {
-    const querySnapshot = await getDocs(triggerWordsRef);
-    if (!querySnapshot.empty) {
-      // ✅ Get the first document in the collection
-      const docRef = doc(db, "triggerwords", querySnapshot.docs[0].id);
-      await setDoc(docRef, { words: wordsArray }, { merge: true }); // ✅ Use setDoc with merge
-      console.log("✅ Trigger words updated in Firestore:", wordsArray);
-    } else {
-      // ✅ Create a new document if none exist
-      await addDoc(triggerWordsRef, { words: wordsArray });
-      console.log("✅ New trigger words document created:", wordsArray);
-    }
-
-    alert("Trigger words saved!");
-    loadTriggerWords(); // ✅ Reload words after saving
-  } catch (error) {
-    console.error("❌ Error saving trigger words:", error);
-  }
-}
-
-// ✅ Function to handle device vibration
-function triggerVibration() {
-  if (navigator.vibrate) {
-    navigator.vibrate([200, 100, 200]);
-    console.log("📳 Device vibrated.");
-  } else {
-    console.warn("⚠️ Vibration not supported on this device.");
-  }
-}
-
-// ✅ Test Firestore connection
 async function testFirestore() {
   try {
+    await authenticateFirebase();
     const querySnapshot = await getDocs(collection(db, "triggerwords"));
     if (querySnapshot.empty) {
       console.warn("⚠️ No documents found in 'triggerwords' collection.");
@@ -164,25 +50,171 @@ async function testFirestore() {
   }
 }
 
-// ✅ Run Firestore fetch on app start
-testFirestore();
-loadTriggerWords(); // ✅ Now safe to call after worker setup
+// Improved function to load trigger words
+async function loadTriggerWords() {
+  try {
+    await authenticateFirebase();
 
-// ✅ Export Firestore instance for use in other files
+    const querySnapshot = await getDocs(triggerWordsRef);
+    let allWords = [];
+
+    querySnapshot.forEach(doc => {
+      const wordsFromDoc = doc.data().words || [];
+      allWords = allWords.concat(wordsFromDoc);
+    });
+
+    // Enhanced word processing: remove duplicates, null, empty strings, and trim
+    const uniqueWords = [...new Set(
+      allWords
+        .filter(word => word && word.trim() !== '')
+        .map(word => word.trim().toLowerCase())
+    )].sort(); // Added sorting for consistent display
+
+    console.log("🔥 Loaded unique trigger words from Firestore:", uniqueWords);
+
+    // Update input field and localStorage
+    document.getElementById("trigger-words").value = uniqueWords.join(", ");
+    localStorage.setItem("savedTriggerWords", JSON.stringify(uniqueWords));
+
+    // Update the saved words display
+    updateSavedWordsDisplay(uniqueWords);
+
+    return uniqueWords;
+  } catch (error) {
+    console.error("❌ Error loading trigger words:", error);
+    return [];
+  }
+}
+
+// Improved function to save trigger words
+async function saveTriggerWords() {
+  try {
+    await authenticateFirebase();
+
+    const input = document.getElementById("trigger-words").value.trim();
+    if (!input) {
+      alert("Please enter trigger words!");
+      return;
+    }
+
+    // Enhanced word processing: remove duplicates, trim, remove empty strings, sort
+    const wordsArray = [...new Set(
+      input.split(",")
+        .map(word => word.trim().toLowerCase())
+        .filter(word => word.length > 0)
+    )].sort();
+
+    const querySnapshot = await getDocs(triggerWordsRef);
+    if (!querySnapshot.empty) {
+      // Update existing document
+      const docRef = doc(db, "triggerwords", querySnapshot.docs[0].id);
+      await setDoc(docRef, { words: wordsArray }, { merge: true });
+      console.log("✅ Trigger words updated in Firestore:", wordsArray);
+    } else {
+      // Create a new document if none exist
+      await addDoc(triggerWordsRef, { words: wordsArray });
+      console.log("✅ New trigger words document created:", wordsArray);
+    }
+
+    alert("Trigger words saved!");
+    updateSavedWordsDisplay(wordsArray);
+    
+    // Update local storage
+    localStorage.setItem("savedTriggerWords", JSON.stringify(wordsArray));
+    
+    // Reload words after saving
+    await loadTriggerWords();
+  } catch (error) {
+    console.error("❌ Error saving trigger words:", error);
+    alert("Failed to save words. Please try again.");
+  }
+}
+
+// Enhanced function to update saved words display
+function updateSavedWordsDisplay(words) {
+  const savedWordsList = document.getElementById("saved-words-list");
+  if (savedWordsList) {
+    // Remove all existing content
+    savedWordsList.innerHTML = "";
+    
+    // If no words, show a placeholder
+    if (words.length === 0) {
+      const placeholder = document.createElement("div");
+      placeholder.className = "placeholder";
+      placeholder.textContent = "No trigger words saved";
+      savedWordsList.appendChild(placeholder);
+      return;
+    }
+    
+    // Create elements for each unique word with a delete button
+    words.forEach(word => {
+      const wordContainer = document.createElement("div");
+      wordContainer.className = "saved-word-container";
+      
+      const wordElement = document.createElement("span");
+      wordElement.className = "saved-word";
+      wordElement.textContent = word;
+      
+      const deleteButton = document.createElement("button");
+      deleteButton.textContent = "❌";
+      deleteButton.className = "delete-word-btn";
+      deleteButton.addEventListener("click", () => deleteWord(word));
+      
+      wordContainer.appendChild(wordElement);
+      wordContainer.appendChild(deleteButton);
+      
+      savedWordsList.appendChild(wordContainer);
+    });
+  }
+}
+
+// Improved function to delete a specific word
+async function deleteWord(wordToDelete) {
+  try {
+    await authenticateFirebase();
+
+    // Get the current saved words from localStorage
+    const savedWords = JSON.parse(localStorage.getItem("savedTriggerWords") || "[]");
+    
+    // Filter out the word to delete and remove duplicates
+    const updatedWords = [...new Set(
+      savedWords.filter(word => word !== wordToDelete)
+    )].sort();
+    
+    // Update localStorage
+    localStorage.setItem("savedTriggerWords", JSON.stringify(updatedWords));
+    
+    // Update Firestore
+    const querySnapshot = await getDocs(triggerWordsRef);
+    if (!querySnapshot.empty) {
+      const docRef = doc(db, "triggerwords", querySnapshot.docs[0].id);
+      await setDoc(docRef, { words: updatedWords }, { merge: true });
+      
+      console.log("✅ Word deleted:", wordToDelete);
+      
+      // Reload trigger words and update display
+      await loadTriggerWords();
+    }
+  } catch (error) {
+    console.error("❌ Error deleting word:", error);
+    alert("Failed to delete word. Please try again.");
+  }
+}
+
+// Ensure DOM is loaded before attaching events
+document.addEventListener("DOMContentLoaded", () => {
+  // Event listener for Save Words button
+  const saveButton = document.getElementById("save-trigger-words");
+  if (saveButton) {
+    saveButton.addEventListener("click", saveTriggerWords);
+  }
+  
+  // Run Firestore fetch on app start
+  testFirestore();
+  loadTriggerWords();
+});
+
+// Export Firestore instance for use in other files
 export { db };
 
-// ✅ Event listener for Save Words button
-document.getElementById("save-trigger-words").addEventListener("click", saveTriggerWords);
-
 console.log("✅ Script successfully loaded!");
-
-// ✅ Register Service Worker
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("service-worker.js")
-    .then(reg => {
-      console.log("✅ Service Worker registered:", reg);
-    })
-    .catch(error => {
-      console.error("❌ Service Worker registration failed:", error);
-    });
-}

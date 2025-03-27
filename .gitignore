@@ -67,7 +67,8 @@ node_modules/
 *.env
 apis.env
 
-
 # dataconnect generated files
 .dataconnect
 
+# Ignore the actual config file
+firebase-config.js 
